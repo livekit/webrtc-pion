@@ -30,7 +30,7 @@ func main() {
 		"for inspecting the raw packets.\n")
 	fmt.Println("🚀 Signaling server started on http://localhost:8080")
 	//nolint:gosec
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(":6080", nil); err != nil {
 		fmt.Printf("Failed to start server: %v\n", err)
 	}
 }

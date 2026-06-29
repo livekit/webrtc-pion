@@ -521,7 +521,13 @@ func (t *DTLSTransport) toDTLSServerOptions(sharedOpts []dtls.Option) []dtls.Ser
 	serverOpts = append(serverOpts,
 		dtls.WithClientAuth(clientAuth),
 		dtls.WithClientCAs(t.api.settingEngine.dtls.clientCAs),
-		dtls.WithInsecureSkipVerifyHello(t.api.settingEngine.dtls.insecureSkipHelloVerify),
+		// SPED (DTLS-in-STUN) only runs after a completed ICE connectivity check,
+		// which already proves return-routability — so the HelloVerifyRequest
+		// cookie round-trip is redundant (this is also why BoringSSL omits it).
+		// Skipping it saves ~1 RTT when the SFU is the DTLS server.
+		dtls.WithInsecureSkipVerifyHello(
+			t.api.settingEngine.dtls.insecureSkipHelloVerify || t.api.settingEngine.enableSped,
+		),
 	)
 
 	if t.api.settingEngine.dtls.serverHelloMessageHook != nil {
