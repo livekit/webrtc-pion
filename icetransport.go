@@ -152,7 +152,7 @@ func (t *ICETransport) StartContext(
 	t.role = *role
 
 	callerCtx := ctx
-	operationCtx, ctxCancel := context.WithCancel(callerCtx)
+	_, ctxCancel := context.WithCancel(callerCtx)
 	t.ctxCancel = ctxCancel
 
 	// Drop the lock here to allow ICE candidates to be
@@ -163,12 +163,12 @@ func (t *ICETransport) StartContext(
 	var err error
 	switch *role {
 	case ICERoleControlling:
-		iceConn, err = agent.Dial(operationCtx,
+		iceConn, err = agent.StartDial(
 			params.UsernameFragment,
 			params.Password)
 
 	case ICERoleControlled:
-		iceConn, err = agent.Accept(operationCtx,
+		iceConn, err = agent.StartAccept(
 			params.UsernameFragment,
 			params.Password)
 
