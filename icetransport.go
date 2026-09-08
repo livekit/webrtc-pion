@@ -179,6 +179,10 @@ func (t *ICETransport) StartContext(
 	if err != nil {
 		t.lock.Lock()
 
+		// The derived context is unused past this point
+		ctxCancel()
+		t.ctxCancel = nil
+
 		return err
 	}
 
