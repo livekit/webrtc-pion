@@ -2959,6 +2959,7 @@ func (pc *PeerConnection) generateUnmatchedSDP(
 		nil,
 		pc.api.settingEngine.getSCTPMaxMessageSize(),
 		false,
+		pc.api.settingEngine.enableSped,
 	)
 }
 
@@ -3147,6 +3148,7 @@ func (pc *PeerConnection) generateMatchedSDP(
 		bundleGroup,
 		pc.api.settingEngine.getSCTPMaxMessageSize(),
 		ignoreRidPauseForRecv,
+		pc.api.settingEngine.enableSped,
 	)
 }
 

@@ -710,6 +710,7 @@ func populateSDP(
 	matchBundleGroup *string,
 	sctpMaxMessageSize uint32,
 	ignoreRidPauseForRecv bool,
+	enableSped bool,
 ) (*sdp.SessionDescription, error) {
 	var err error
 	mediaDtlsFingerprints := []DTLSFingerprint{}
@@ -789,6 +790,14 @@ func populateSDP(
 	if isICELite {
 		// RFC 5245 S15.3
 		descr = descr.WithValueAttribute(sdp.AttrKeyICELite, "")
+	}
+
+	if enableSped {
+		// Advertise SPED so a libwebrtc peer enables DTLS-in-STUN.
+		// Without it, it answers with plain DTLS and the fold silently does not happen.
+		// "trickle" (RFC 8840 S4.1.1) is kept in the list because a peer that sees
+		// ice-options without it treats us as a non-trickle agent and de-paces ICE.
+		descr = descr.WithValueAttribute(sdp.AttrKeyICEOptions, "trickle goog-sped-v1")
 	}
 
 	if isExtmapAllowMixed {
