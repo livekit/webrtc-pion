@@ -326,6 +326,64 @@ func (t *DTLSTransport) StartContext(ctx context.Context, remoteParameters DTLSP
 	})
 }
 
+// dtlsPacketInjector feeds embedded DTLS packets into a dtls.Conn from its own
+// goroutine, in arrival order.
+//
+// Conn.InjectInboundPacket sends on an unbuffered channel that only
+// Conn.nextPacket reads, so it blocks until the DTLS stack asks for its next
+// packet. The SPED callback runs on the ICE agent's task loop, the one
+// goroutine handling all inbound STUN, and blocking that stalls the agent so
+// the handshake never completes. Queue instead and let this goroutine block.
+type dtlsPacketInjector struct {
+	packets   chan pendingDTLSPacket
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+// dtlsInjectorQueueLen is deliberately generous: a DTLS handshake flight is a
+// handful of packets, so reaching this bound means the DTLS stack has stopped
+// consuming altogether and dropping is the right answer.
+const dtlsInjectorQueueLen = 128
+
+func newDTLSPacketInjector(conn *dtls.Conn) *dtlsPacketInjector {
+	injector := &dtlsPacketInjector{
+		packets: make(chan pendingDTLSPacket, dtlsInjectorQueueLen),
+		done:    make(chan struct{}),
+	}
+
+	go func() {
+		for {
+			select {
+			case <-injector.done:
+				return
+			case packet := <-injector.packets:
+				conn.InjectInboundPacket(packet.packet, packet.rAddr)
+			}
+		}
+	}()
+
+	return injector
+}
+
+// enqueue is the SPED callback handed to ICETransport. It never blocks.
+func (i *dtlsPacketInjector) enqueue(packet []byte, rAddr net.Addr) {
+	buffered := make([]byte, len(packet))
+	copy(buffered, packet)
+
+	select {
+	case i.packets <- pendingDTLSPacket{packet: buffered, rAddr: rAddr}:
+	case <-i.done:
+	default:
+		// Queue full: drop rather than block the caller. DTLS retransmits its
+		// flights, so a drop costs a retransmission. Blocking would cost the
+		// whole ICE agent.
+	}
+}
+
+func (i *dtlsPacketInjector) stop() {
+	i.closeOnce.Do(func() { close(i.done) })
+}
+
 func (t *DTLSTransport) start(remoteParameters DTLSParameters, handshake func(*dtls.Conn) error) error {
 	role, certificate, err := t.prepareStart(remoteParameters)
 	if err != nil {
@@ -347,9 +405,9 @@ func (t *DTLSTransport) start(remoteParameters DTLSParameters, handshake func(*d
 
 	// Configure ICE for SPED after we created the DTLS transport.
 	if t.api.settingEngine.enableSped {
-		t.iceTransport.SetDtlsCallback(func(packet []byte, rAddr net.Addr) {
-			dtlsConn.InjectInboundPacket(packet, rAddr)
-		})
+		injector := newDTLSPacketInjector(dtlsConn)
+		defer injector.stop()
+		t.iceTransport.SetDtlsCallback(injector.enqueue)
 	}
 
 	// This awaits the DTLS handshake.

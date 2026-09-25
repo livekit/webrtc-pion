@@ -761,6 +761,7 @@ func TestMediaDescriptionFingerprints(t *testing.T) {
 				nil,
 				0,
 				false,
+				false,
 			)
 			assert.NoError(t, err)
 
@@ -816,6 +817,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			nil,
 			se.getSCTPMaxMessageSize(),
 			se.ignoreRidPauseForRecv,
+			false,
 		)
 		assert.Nil(t, err)
 
@@ -878,6 +880,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			nil,
 			se.getSCTPMaxMessageSize(),
 			se.ignoreRidPauseForRecv,
+			false,
 		)
 		assert.Nil(t, err)
 
@@ -938,6 +941,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			nil,
 			se.getSCTPMaxMessageSize(),
 			false,
+			false,
 		)
 		assert.Nil(t, err)
 
@@ -978,6 +982,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			ICEGatheringStateComplete,
 			nil,
 			se.getSCTPMaxMessageSize(),
+			false,
 			false,
 		)
 		assert.Nil(t, err)
@@ -1038,6 +1043,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			nil,
 			se.getSCTPMaxMessageSize(),
 			false,
+			false,
 		)
 		assert.NoError(t, err)
 
@@ -1072,6 +1078,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			nil,
 			se.getSCTPMaxMessageSize(),
 			false,
+			false,
 		)
 		assert.Nil(t, err)
 
@@ -1102,6 +1109,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			ICEGatheringStateComplete,
 			nil,
 			se.getSCTPMaxMessageSize(),
+			false,
 			false,
 		)
 		assert.Nil(t, err)
@@ -1148,6 +1156,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			nil,
 			se.getSCTPMaxMessageSize(),
 			false,
+			false,
 		)
 		assert.Nil(t, err)
 
@@ -1188,6 +1197,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			ICEGatheringStateComplete,
 			&matchedBundle,
 			se.getSCTPMaxMessageSize(),
+			false,
 			false,
 		)
 		assert.Nil(t, err)
@@ -1232,6 +1242,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			&matchedBundle,
 			se.getSCTPMaxMessageSize(),
 			false,
+			false,
 		)
 		assert.Nil(t, err)
 
@@ -1265,6 +1276,7 @@ func TestPopulateSDP(t *testing.T) { //nolint:gocyclo,cyclop,maintidx
 			ICEGatheringStateComplete,
 			nil,
 			se.getSCTPMaxMessageSize(),
+			false,
 			false,
 		)
 		assert.Nil(t, err)

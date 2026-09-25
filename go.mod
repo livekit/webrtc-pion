@@ -36,6 +36,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/pion/dtls/v3 => github.com/livekit/dtls/v3 v3.1.4-warp.1
+replace github.com/pion/dtls/v3 => github.com/livekit/dtls/v3 v3.1.5-warp.1
 
-replace github.com/pion/ice/v4 => github.com/livekit/ice/v4 v4.2.7-warp.1
+replace github.com/pion/ice/v4 => github.com/livekit/ice/v4 v4.4.0-warp.1
