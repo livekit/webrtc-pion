@@ -19,6 +19,12 @@ import (
 	"github.com/pion/webrtc/v4/internal/util"
 )
 
+// pendingDTLSPacket is an embedded DTLS packet held until DTLSTransport is ready.
+type pendingDTLSPacket struct {
+	packet []byte
+	rAddr  net.Addr
+}
+
 // ICETransport allows an application access to information about the ICE
 // transport over which packets are sent and received.
 type ICETransport struct {
@@ -41,6 +47,10 @@ type ICETransport struct {
 	loggerFactory logging.LoggerFactory
 
 	dtlsCallback func(packet []byte, rAddr net.Addr)
+
+	// Inbound DTLS packets the agent delivered before DTLSTransport configured
+	// its callback (SPED only)
+	pendingDTLSPackets []pendingDTLSPacket
 
 	log logging.LeveledLogger
 }
@@ -123,7 +133,16 @@ func (t *ICETransport) StartContext(
 	if agent == nil {
 		return fmt.Errorf("%w: unable to start ICETransport", errICEAgentNotExist)
 	}
-	agent.SetDtlsCallback(t.dtlsCallback)
+
+	// The agent only piggybacks DTLS once a callback is set, and DTLSTransport
+	// cannot set the real one until the mux exists (created below). If ICE
+	// connects in that gap the handshake falls back to plain DTLS and loses the
+	// round trip SPED saves. Install a shim now and buffer until it arrives.
+	if t.gatherer.api.settingEngine.enableSped && t.dtlsCallback == nil {
+		agent.SetDtlsCallback(t.forwardDTLSPacket)
+	} else {
+		agent.SetDtlsCallback(t.dtlsCallback)
+	}
 
 	if err := agent.OnConnectionStateChange(func(iceState ice.ConnectionState) {
 		state := newICETransportStateFromICE(iceState)
@@ -179,6 +198,10 @@ func (t *ICETransport) StartContext(
 	if err != nil {
 		t.lock.Lock()
 
+		// The derived context is unused past this point
+		ctxCancel()
+		t.ctxCancel = nil
+
 		return err
 	}
 
@@ -222,12 +245,53 @@ func (t *ICETransport) StartContext(
 
 func (t *ICETransport) SetDtlsCallback(cb func(packet []byte, rAddr net.Addr)) {
 	t.lock.Lock()
-	defer t.lock.Unlock()
-	if agent := t.gatherer.getAgent(); agent != nil {
-		agent.SetDtlsCallback(cb)
-	} else {
-		t.dtlsCallback = cb
+	agent := t.gatherer.getAgent()
+
+	if agent == nil || !t.gatherer.api.settingEngine.enableSped {
+		if agent != nil {
+			agent.SetDtlsCallback(cb)
+		} else {
+			t.dtlsCallback = cb
+		}
+		t.lock.Unlock()
+
+		return
 	}
+
+	// SPED: StartContext put a shim on the agent that forwards to this field, so
+	// record the callback and hand it whatever arrived before it existed.
+	t.dtlsCallback = cb
+	pending := t.pendingDTLSPackets
+	t.pendingDTLSPackets = nil
+	t.lock.Unlock()
+
+	if cb == nil {
+		// Teardown: take the shim off the agent as well.
+		agent.SetDtlsCallback(nil)
+
+		return
+	}
+
+	for _, p := range pending {
+		cb(p.packet, p.rAddr)
+	}
+}
+
+// forwardDTLSPacket hands an embedded DTLS packet to DTLSTransport, buffering it
+// while the DTLS transport is still being built.
+func (t *ICETransport) forwardDTLSPacket(packet []byte, rAddr net.Addr) {
+	t.lock.Lock()
+	if cb := t.dtlsCallback; cb != nil {
+		t.lock.Unlock()
+		cb(packet, rAddr)
+
+		return
+	}
+
+	buffered := make([]byte, len(packet))
+	copy(buffered, packet)
+	t.pendingDTLSPackets = append(t.pendingDTLSPackets, pendingDTLSPacket{packet: buffered, rAddr: rAddr})
+	t.lock.Unlock()
 }
 
 // restart is not exposed currently because ORTC has users create a whole new ICETransport
