@@ -8,9 +8,36 @@ package webrtc
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+// TestForwardDTLSPacketDoesNotBlockOnTransportLock guards the SPED deadlock fix:
+// forwardDTLSPacket runs on the ICE agent task loop and must take only
+// dtlsCbLock, never t.lock. Renegotiation paths (e.g. setRemoteCredentials)
+// hold t.lock while synchronously blocking on that loop, so if forwardDTLSPacket
+// took t.lock the two would deadlock. Here we hold t.lock (standing in for a
+// renegotiation) and require forwardDTLSPacket to still complete.
+func TestForwardDTLSPacketDoesNotBlockOnTransportLock(t *testing.T) {
+	it := &ICETransport{}
+
+	it.lock.Lock()
+	defer it.lock.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		// dtlsCallback is nil, so this takes the buffer path (dtlsCbLock only).
+		it.forwardDTLSPacket([]byte{0x16, 0x00, 0x01}, nil)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("forwardDTLSPacket blocked on t.lock — deadlock risk with renegotiation")
+	}
+}
 
 func TestWarp(t *testing.T) {
 	s := SettingEngine{}

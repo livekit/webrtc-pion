@@ -46,6 +46,7 @@ type ICETransport struct {
 
 	loggerFactory logging.LoggerFactory
 
+	dtlsCbLock   sync.Mutex
 	dtlsCallback func(packet []byte, rAddr net.Addr)
 
 	// Inbound DTLS packets the agent delivered before DTLSTransport configured
@@ -138,10 +139,13 @@ func (t *ICETransport) StartContext(
 	// cannot set the real one until the mux exists (created below). If ICE
 	// connects in that gap the handshake falls back to plain DTLS and loses the
 	// round trip SPED saves. Install a shim now and buffer until it arrives.
-	if t.gatherer.api.settingEngine.enableSped && t.dtlsCallback == nil {
+	t.dtlsCbLock.Lock()
+	existingCallback := t.dtlsCallback
+	t.dtlsCbLock.Unlock()
+	if t.gatherer.api.settingEngine.enableSped && existingCallback == nil {
 		agent.SetDtlsCallback(t.forwardDTLSPacket)
 	} else {
-		agent.SetDtlsCallback(t.dtlsCallback)
+		agent.SetDtlsCallback(existingCallback)
 	}
 
 	if err := agent.OnConnectionStateChange(func(iceState ice.ConnectionState) {
@@ -251,7 +255,9 @@ func (t *ICETransport) SetDtlsCallback(cb func(packet []byte, rAddr net.Addr)) {
 		if agent != nil {
 			agent.SetDtlsCallback(cb)
 		} else {
+			t.dtlsCbLock.Lock()
 			t.dtlsCallback = cb
+			t.dtlsCbLock.Unlock()
 		}
 		t.lock.Unlock()
 
@@ -260,9 +266,11 @@ func (t *ICETransport) SetDtlsCallback(cb func(packet []byte, rAddr net.Addr)) {
 
 	// SPED: StartContext put a shim on the agent that forwards to this field, so
 	// record the callback and hand it whatever arrived before it existed.
+	t.dtlsCbLock.Lock()
 	t.dtlsCallback = cb
 	pending := t.pendingDTLSPackets
 	t.pendingDTLSPackets = nil
+	t.dtlsCbLock.Unlock()
 	t.lock.Unlock()
 
 	if cb == nil {
@@ -280,9 +288,10 @@ func (t *ICETransport) SetDtlsCallback(cb func(packet []byte, rAddr net.Addr)) {
 // forwardDTLSPacket hands an embedded DTLS packet to DTLSTransport, buffering it
 // while the DTLS transport is still being built.
 func (t *ICETransport) forwardDTLSPacket(packet []byte, rAddr net.Addr) {
-	t.lock.Lock()
+	// it is called in the ICE agent's task loop, so it must not acquire t.lock.
+	t.dtlsCbLock.Lock()
 	if cb := t.dtlsCallback; cb != nil {
-		t.lock.Unlock()
+		t.dtlsCbLock.Unlock()
 		cb(packet, rAddr)
 
 		return
@@ -291,7 +300,7 @@ func (t *ICETransport) forwardDTLSPacket(packet []byte, rAddr net.Addr) {
 	buffered := make([]byte, len(packet))
 	copy(buffered, packet)
 	t.pendingDTLSPackets = append(t.pendingDTLSPackets, pendingDTLSPacket{packet: buffered, rAddr: rAddr})
-	t.lock.Unlock()
+	t.dtlsCbLock.Unlock()
 }
 
 // restart is not exposed currently because ORTC has users create a whole new ICETransport
