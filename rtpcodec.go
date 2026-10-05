@@ -109,6 +109,29 @@ func codecParametersFuzzySearch(
 	needle RTPCodecParameters,
 	haystack []RTPCodecParameters,
 ) (RTPCodecParameters, codecMatchType) {
+	return codecParametersFuzzySearchParsed(needle, haystack, parseCodecFMTPs(haystack))
+}
+
+// parseCodecFMTPs parses each codec's fmtp line once, so a caller searching many
+// needles against the same haystack does not re-parse it per needle.
+func parseCodecFMTPs(codecs []RTPCodecParameters) []fmtp.FMTP {
+	parsed := make([]fmtp.FMTP, len(codecs))
+	for i, c := range codecs {
+		parsed[i] = fmtp.Parse(
+			c.RTPCodecCapability.MimeType,
+			c.RTPCodecCapability.ClockRate,
+			c.RTPCodecCapability.Channels,
+			c.RTPCodecCapability.SDPFmtpLine)
+	}
+
+	return parsed
+}
+
+func codecParametersFuzzySearchParsed(
+	needle RTPCodecParameters,
+	haystack []RTPCodecParameters,
+	haystackFmtp []fmtp.FMTP,
+) (RTPCodecParameters, codecMatchType) {
 	needleFmtp := fmtp.Parse(
 		needle.RTPCodecCapability.MimeType,
 		needle.RTPCodecCapability.ClockRate,
@@ -116,14 +139,8 @@ func codecParametersFuzzySearch(
 		needle.RTPCodecCapability.SDPFmtpLine)
 
 	// First attempt to match on MimeType + ClockRate + Channels + SDPFmtpLine
-	for _, c := range haystack {
-		cfmtp := fmtp.Parse(
-			c.RTPCodecCapability.MimeType,
-			c.RTPCodecCapability.ClockRate,
-			c.RTPCodecCapability.Channels,
-			c.RTPCodecCapability.SDPFmtpLine)
-
-		if needleFmtp.Match(cfmtp) {
+	for i, c := range haystack {
+		if needleFmtp.Match(haystackFmtp[i]) {
 			return c, codecMatchExact
 		}
 	}
