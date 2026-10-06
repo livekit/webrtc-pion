@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_RTPTransceiver_SetCodecPreferences(t *testing.T) {
@@ -304,4 +305,22 @@ func Test_ParseExtensionFromPaddingOnlyPacket(t *testing.T) {
 	assert.Equal(t, rid, "")
 	assert.Equal(t, rsid, "f")
 	assert.Equal(t, paddingOnly, true)
+}
+
+func BenchmarkRTPTransceiverGetCodecs(b *testing.B) {
+	mediaEngine := &MediaEngine{}
+	require.NoError(b, mediaEngine.RegisterDefaultCodecs())
+	api := NewAPI(WithMediaEngine(mediaEngine))
+	pc, err := api.NewPeerConnection(Configuration{})
+	require.NoError(b, err)
+	defer func() { assert.NoError(b, pc.Close()) }()
+
+	tr, err := pc.AddTransceiverFromKind(RTPCodecTypeVideo)
+	require.NoError(b, err)
+	require.NoError(b, tr.SetCodecPreferences(mediaEngine.getCodecsByKind(RTPCodecTypeVideo)))
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = tr.getCodecs()
+	}
 }

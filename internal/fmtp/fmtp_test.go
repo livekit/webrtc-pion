@@ -715,3 +715,22 @@ func TestMatch(t *testing.T) { //nolint:maintidx
 		})
 	}
 }
+
+func TestDefaults(t *testing.T) {
+	for _, ca := range []struct {
+		mimeType  string
+		clockRate uint32
+		channels  uint16
+	}{
+		{"audio/opus", 48000, 2},
+		{"audio/OPUS", 48000, 2},
+		{"audio/pcmu", 8000, 0},
+		{"audio/PCMA", 8000, 0},
+		{"video/vp8", 90000, 0},
+	} {
+		t.Run(ca.mimeType, func(t *testing.T) {
+			assert.Equal(t, ca.clockRate, defaultClockRate(ca.mimeType))
+			assert.Equal(t, ca.channels, defaultChannels(ca.mimeType))
+		})
+	}
+}
