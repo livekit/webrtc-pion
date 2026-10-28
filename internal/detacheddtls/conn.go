@@ -27,6 +27,13 @@ type Config struct {
 	TransportClosed    <-chan struct{}
 	NetConn            netconn.Config
 	OnClose            func()
+
+	// PiggybackDatagrams, when set, receives each outbound datagram batch while
+	// the handshake is still in progress. Returning handled==true means the
+	// batch was consumed (SPED embedded it into STUN) and must not be written to
+	// the socket. Each batch is one flight; the caller treats the last datagram
+	// as the end of that flight.
+	PiggybackDatagrams func(datagrams [][]byte) (handled bool, err error)
 }
 
 // Conn pumps a DetachedConn and exposes only its plaintext application data as
@@ -195,6 +202,21 @@ func (c *Conn) processReadyEvents(conn *dtls.DetachedConn) error {
 }
 
 func (c *Conn) writeDatagrams(datagrams [][]byte) error {
+	// During the handshake SPED piggybacks the outbound flight into STUN instead
+	// of writing it to the socket. c.ready flips only on DetachedHandshakeDone,
+	// which is drained after the final flight's write event, so the whole
+	// handshake is covered. Only the single processEvents goroutine mutates
+	// c.ready, so reading it here needs no lock.
+	if !c.ready && c.config.PiggybackDatagrams != nil {
+		handled, err := c.config.PiggybackDatagrams(datagrams)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
+	}
+
 	for _, datagram := range datagrams {
 		if _, err := c.config.WriteDatagram(datagram); err != nil {
 			return err
@@ -202,6 +224,19 @@ func (c *Conn) writeDatagrams(datagrams [][]byte) error {
 	}
 
 	return nil
+}
+
+// HandleDatagram feeds an inbound DTLS datagram into the current association.
+// SPED uses it to inject handshake records extracted from STUN.
+func (c *Conn) HandleDatagram(packet []byte) error {
+	c.driveMu.Lock()
+	conn := c.dtlsConn
+	c.driveMu.Unlock()
+	if conn == nil {
+		return nil
+	}
+
+	return c.handleDatagram(conn, packet)
 }
 
 func (c *Conn) write(data []byte) (int, error) {

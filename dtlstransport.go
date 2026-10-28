@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -414,6 +415,7 @@ func (t *DTLSTransport) start(
 		conn = detacheddtls.New(detacheddtls.Config{
 			WriteDatagram:      t.iceTransport.write,
 			SetDatagramHandler: t.iceTransport.setDTLSHandler,
+			PiggybackDatagrams: t.spedPiggyback(),
 			TransportClosed:    t.iceTransport.readLoopFinished(),
 			NetConn: netconn.Config{
 				LocalAddr:        t.iceTransport.localAddr,
@@ -447,6 +449,20 @@ func (t *DTLSTransport) start(
 	t.dtlsConn = dtlsConn
 	t.lock.Unlock()
 
+	if t.api.settingEngine.enableSped {
+		// SPED: DTLS handshake records ride ICE/STUN. Outbound flights piggyback
+		// via PiggybackDatagrams (above); inbound records extracted from STUN are
+		// acked (0xC071) and fed into the association here. Replaces the dtls-level
+		// intercept/inject hooks, which the DetachedConn boundary makes redundant.
+		sconn := conn
+		t.iceTransport.SetDtlsCallback(func(packet []byte, _ net.Addr) {
+			t.iceTransport.ReportDtlsPacket(packet)
+			if err := sconn.HandleDatagram(packet); err != nil {
+				t.log.Warnf("sped: handle inbound datagram: %v", err)
+			}
+		})
+	}
+
 	err = conn.Start(ctx, dtlsConn)
 	if err == nil {
 		err = t.completeStart(dtlsConn)
@@ -478,6 +494,7 @@ func (t *DTLSTransport) dtlsSharedOptions(certificate tls.Certificate) []dtls.Op
 		)
 	}
 
+	// TODO: should this initially be set to one day for SPED?
 	if t.api.settingEngine.dtls.retransmissionInterval > 0 {
 		sharedOpts = append(
 			sharedOpts,
@@ -521,6 +538,12 @@ func (t *DTLSTransport) dtlsSharedOptions(certificate tls.Certificate) []dtls.Op
 		)
 	}
 
+	if t.api.settingEngine.enableSped {
+		// Shrink records so a flight (including post-quantum key shares) fits into
+		// a STUN attribute without IP fragmentation, like libwebrtc.
+		sharedOpts = append(sharedOpts, dtls.WithMTU(spedDTLSMTU))
+	}
+
 	return sharedOpts
 }
 
@@ -555,6 +578,51 @@ func (t *DTLSTransport) verifyPeerCertificateFunc() func([][]byte, [][]*x509.Cer
 	}
 }
 
+// spedDTLSMTU leaves room for the STUN overhead when a flight is embedded.
+const spedDTLSMTU = 900
+
+// spedRemoteAddr stands in as the DTLS peer address until ICE selects a pair, so
+// SPED can start the handshake immediately (piggybacking the ClientHello into the
+// first STUN) instead of waiting for connectivity checks to finish. Datagrams are
+// routed via ICE/Piggyback, not this address, so the placeholder is never dialed.
+var spedRemoteAddr = &net.UDPAddr{} //nolint:gochecknoglobals
+
+// dtlsRemoteAddr is the address connectDTLS creates the association with. For SPED
+// it returns the placeholder before a pair exists so the handshake can fold into
+// ICE; otherwise it waits for the real selected-pair address.
+func (t *DTLSTransport) dtlsRemoteAddr() net.Addr {
+	if addr := t.iceTransport.remoteAddr(); addr != nil || !t.api.settingEngine.enableSped {
+		return addr
+	}
+
+	return spedRemoteAddr
+}
+
+// spedPiggyback returns the outbound-datagram hook for detacheddtls, or nil when
+// SPED is disabled. Each batch is one handshake flight; the last datagram marks
+// the end of the flight for the ICE agent.
+func (t *DTLSTransport) spedPiggyback() func([][]byte) (bool, error) {
+	if !t.api.settingEngine.enableSped {
+		return nil
+	}
+
+	return func(datagrams [][]byte) (bool, error) {
+		// Piggyback returns false when the agent won't carry the flight on STUN
+		// (no agent yet, or SPED is off/complete once ICE is connected). In that
+		// case the caller must fall back to writing it as plain DTLS, so report
+		// handled only when every datagram was consumed. A flight shares one
+		// piggyback state, so this is all-or-nothing in practice.
+		consumed := true
+		for i, datagram := range datagrams {
+			if !t.iceTransport.Piggyback(datagram, i == len(datagrams)-1) {
+				consumed = false
+			}
+		}
+
+		return consumed, nil
+	}
+}
+
 func (t *DTLSTransport) connectDTLS(
 	ctx context.Context, role DTLSRole, opts []dtls.Option,
 ) (*dtls.DetachedConn, error) {
@@ -563,7 +631,7 @@ func (t *DTLSTransport) connectDTLS(
 			t.iceTransport.State() == ICETransportStateFailed {
 			return nil, io.ErrClosedPipe
 		}
-		if addr := t.iceTransport.remoteAddr(); addr != nil {
+		if addr := t.dtlsRemoteAddr(); addr != nil {
 			if role == DTLSRoleClient {
 				return dtls.DetachedClient(addr, t.toDTLSClientOptions(opts)...)
 			}
@@ -592,7 +660,13 @@ func (t *DTLSTransport) toDTLSServerOptions(sharedOpts []dtls.Option) []dtls.Ser
 	serverOpts = append(serverOpts,
 		dtls.WithClientAuth(clientAuth),
 		dtls.WithClientCAs(t.api.settingEngine.dtls.clientCAs),
-		dtls.WithInsecureSkipVerifyHello(t.api.settingEngine.dtls.insecureSkipHelloVerify),
+		// SPED (DTLS-in-STUN) only runs after a completed ICE connectivity check,
+		// which already proves return-routability — so the HelloVerifyRequest
+		// cookie round-trip is redundant (this is also why BoringSSL omits it).
+		// Skipping it saves ~1 RTT when the SFU is the DTLS server.
+		dtls.WithInsecureSkipVerifyHello(
+			t.api.settingEngine.dtls.insecureSkipHelloVerify || t.api.settingEngine.enableSped,
+		),
 	)
 
 	if t.api.settingEngine.dtls.serverHelloMessageHook != nil {
@@ -642,6 +716,10 @@ func (t *DTLSTransport) completeStart(dtlsConn *dtls.DetachedConn) error {
 	}
 	t.srtpProtectionProfile = srtpProtectionProfile
 	t.onStateChange(DTLSTransportStateConnected)
+	if t.api.settingEngine.enableSped {
+		t.iceTransport.Piggyback(nil, true)
+		t.iceTransport.SetDtlsCallback(nil)
+	}
 
 	// SRTP starts once media is negotiated, so a connection with only data
 	// channels runs no SRTP sessions.

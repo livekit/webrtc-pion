@@ -4,7 +4,6 @@ go 1.24.0
 
 require (
 	github.com/pion/datachannel v1.6.3
-	github.com/pion/dtls/v3 v3.1.15
 	github.com/pion/dtls/v4 v4.0.0-rc.7
 	github.com/pion/ice/v4 v4.4.8
 	github.com/pion/interceptor v0.1.49
@@ -27,6 +26,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/gomega v1.17.0 // indirect
+	github.com/pion/dtls/v3 v3.1.15 // indirect
 	github.com/pion/mdns/v2 v2.2.2 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
@@ -34,3 +34,5 @@ require (
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 )
+
+replace github.com/pion/ice/v4 => github.com/livekit/ice/v4 v4.4.0-warp.4

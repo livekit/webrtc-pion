@@ -31,6 +31,12 @@ const (
 	iceEndpointSRTCP
 )
 
+// pendingDTLSPacket is an embedded DTLS packet held until DTLSTransport is ready.
+type pendingDTLSPacket struct {
+	packet []byte
+	rAddr  net.Addr
+}
+
 // ICETransport allows an application access to information about the ICE
 // transport over which packets are sent and received.
 type ICETransport struct {
@@ -58,6 +64,13 @@ type ICETransport struct {
 	ctxCancel func()
 
 	loggerFactory logging.LoggerFactory
+
+	dtlsCbLock   sync.Mutex
+	dtlsCallback func(packet []byte, rAddr net.Addr)
+
+	// Inbound DTLS packets the agent delivered before DTLSTransport configured
+	// its callback (SPED only)
+	pendingDTLSPackets []pendingDTLSPacket
 
 	log logging.LeveledLogger
 }
@@ -142,6 +155,19 @@ func (t *ICETransport) StartContext(
 		return fmt.Errorf("%w: unable to start ICETransport", errICEAgentNotExist)
 	}
 
+	// The agent only piggybacks DTLS once a callback is set, and DTLSTransport
+	// cannot set the real one until the mux exists (created below). If ICE
+	// connects in that gap the handshake falls back to plain DTLS and loses the
+	// round trip SPED saves. Install a shim now and buffer until it arrives.
+	t.dtlsCbLock.Lock()
+	existingCallback := t.dtlsCallback
+	t.dtlsCbLock.Unlock()
+	if t.gatherer.api.settingEngine.enableSped && existingCallback == nil {
+		agent.SetDtlsCallback(t.forwardDTLSPacket)
+	} else {
+		agent.SetDtlsCallback(existingCallback)
+	}
+
 	if err := agent.OnConnectionStateChange(func(iceState ice.ConnectionState) {
 		state := newICETransportStateFromICE(iceState)
 
@@ -172,7 +198,7 @@ func (t *ICETransport) StartContext(
 	t.role = *role
 
 	callerCtx := ctx
-	operationCtx, ctxCancel := context.WithCancel(callerCtx)
+	_, ctxCancel := context.WithCancel(callerCtx)
 	t.ctxCancel = ctxCancel
 
 	// Drop the lock here to allow ICE candidates to be
@@ -183,17 +209,32 @@ func (t *ICETransport) StartContext(
 	var err error
 	switch *role {
 	case ICERoleControlling:
-		iceConn, err = agent.Dial(operationCtx,
+		iceConn, err = agent.StartDial(
 			params.UsernameFragment,
 			params.Password)
 
 	case ICERoleControlled:
-		iceConn, err = agent.Accept(operationCtx,
+		iceConn, err = agent.StartAccept(
 			params.UsernameFragment,
 			params.Password)
 
 	default:
 		err = errICERoleUnknown
+	}
+
+	if err != nil {
+		t.lock.Lock()
+
+		// The derived context is unused past this point
+		ctxCancel()
+		t.ctxCancel = nil
+
+		return err
+	}
+
+	if !t.gatherer.api.settingEngine.enableSped {
+		// Note: this blocks until a pair is found.
+		err = agent.AwaitConnect(ctx)
 	}
 
 	// Reacquire the lock to set the connection and start WebRTC packet dispatch.
@@ -223,6 +264,62 @@ func (t *ICETransport) StartContext(
 	go t.readLoop(iceConn, t.readLoopDone)
 
 	return nil
+}
+
+func (t *ICETransport) SetDtlsCallback(cb func(packet []byte, rAddr net.Addr)) {
+	t.lock.Lock()
+	agent := t.gatherer.getAgent()
+
+	if agent == nil || !t.gatherer.api.settingEngine.enableSped {
+		if agent != nil {
+			agent.SetDtlsCallback(cb)
+		} else {
+			t.dtlsCbLock.Lock()
+			t.dtlsCallback = cb
+			t.dtlsCbLock.Unlock()
+		}
+		t.lock.Unlock()
+
+		return
+	}
+
+	// SPED: StartContext put a shim on the agent that forwards to this field, so
+	// record the callback and hand it whatever arrived before it existed.
+	t.dtlsCbLock.Lock()
+	t.dtlsCallback = cb
+	pending := t.pendingDTLSPackets
+	t.pendingDTLSPackets = nil
+	t.dtlsCbLock.Unlock()
+	t.lock.Unlock()
+
+	if cb == nil {
+		// Teardown: take the shim off the agent as well.
+		agent.SetDtlsCallback(nil)
+
+		return
+	}
+
+	for _, p := range pending {
+		cb(p.packet, p.rAddr)
+	}
+}
+
+// forwardDTLSPacket hands an embedded DTLS packet to DTLSTransport, buffering it
+// while the DTLS transport is still being built.
+func (t *ICETransport) forwardDTLSPacket(packet []byte, rAddr net.Addr) {
+	// it is called in the ICE agent's task loop, so it must not acquire t.lock.
+	t.dtlsCbLock.Lock()
+	if cb := t.dtlsCallback; cb != nil {
+		t.dtlsCbLock.Unlock()
+		cb(packet, rAddr)
+
+		return
+	}
+
+	buffered := make([]byte, len(packet))
+	copy(buffered, packet)
+	t.pendingDTLSPackets = append(t.pendingDTLSPackets, pendingDTLSPacket{packet: buffered, rAddr: rAddr})
+	t.dtlsCbLock.Unlock()
 }
 
 // restart is not exposed currently because ORTC has users create a whole new ICETransport
@@ -726,3 +823,30 @@ func (t *ICETransport) setRemoteCredentials(newUfrag, newPwd string) error {
 	return agent.SetRemoteCredentials(newUfrag, newPwd)
 }
 
+// Piggyback forwards a raw packet to the ICE Agent.
+func (t *ICETransport) Piggyback(packet []byte, end bool) bool {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	agent := t.gatherer.getAgent()
+	if agent == nil {
+		t.log.Warnf("%w: unable to Piggyback", errICEAgentNotExist)
+
+		return false
+	}
+
+	return agent.Piggyback(packet, end)
+}
+
+func (t *ICETransport) ReportDtlsPacket(packet []byte) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	agent := t.gatherer.getAgent()
+	if agent == nil {
+		t.log.Warnf("%w: unable report DTLS packet", errICEAgentNotExist)
+
+		return
+	}
+	agent.ReportDtlsPacket(packet)
+}
