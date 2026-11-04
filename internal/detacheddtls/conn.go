@@ -202,11 +202,6 @@ func (c *Conn) processReadyEvents(conn *dtls.DetachedConn) error {
 }
 
 func (c *Conn) writeDatagrams(datagrams [][]byte) error {
-	// During the handshake SPED piggybacks the outbound flight into STUN instead
-	// of writing it to the socket. c.ready flips only on DetachedHandshakeDone,
-	// which is drained after the final flight's write event, so the whole
-	// handshake is covered. Only the single processEvents goroutine mutates
-	// c.ready, so reading it here needs no lock.
 	if !c.ready && c.config.PiggybackDatagrams != nil {
 		handled, err := c.config.PiggybackDatagrams(datagrams)
 		if err != nil {

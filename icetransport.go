@@ -155,10 +155,6 @@ func (t *ICETransport) StartContext(
 		return fmt.Errorf("%w: unable to start ICETransport", errICEAgentNotExist)
 	}
 
-	// The agent only piggybacks DTLS once a callback is set, and DTLSTransport
-	// cannot set the real one until the mux exists (created below). If ICE
-	// connects in that gap the handshake falls back to plain DTLS and loses the
-	// round trip SPED saves. Install a shim now and buffer until it arrives.
 	t.dtlsCbLock.Lock()
 	existingCallback := t.dtlsCallback
 	t.dtlsCbLock.Unlock()
@@ -304,8 +300,6 @@ func (t *ICETransport) SetDtlsCallback(cb func(packet []byte, rAddr net.Addr)) {
 	}
 }
 
-// forwardDTLSPacket hands an embedded DTLS packet to DTLSTransport, buffering it
-// while the DTLS transport is still being built.
 func (t *ICETransport) forwardDTLSPacket(packet []byte, rAddr net.Addr) {
 	// it is called in the ICE agent's task loop, so it must not acquire t.lock.
 	t.dtlsCbLock.Lock()

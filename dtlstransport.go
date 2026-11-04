@@ -450,10 +450,6 @@ func (t *DTLSTransport) start(
 	t.lock.Unlock()
 
 	if t.api.settingEngine.enableSped {
-		// SPED: DTLS handshake records ride ICE/STUN. Outbound flights piggyback
-		// via PiggybackDatagrams (above); inbound records extracted from STUN are
-		// acked (0xC071) and fed into the association here. Replaces the dtls-level
-		// intercept/inject hooks, which the DetachedConn boundary makes redundant.
 		sconn := conn
 		t.iceTransport.SetDtlsCallback(func(packet []byte, _ net.Addr) {
 			t.iceTransport.ReportDtlsPacket(packet)
@@ -607,11 +603,6 @@ func (t *DTLSTransport) spedPiggyback() func([][]byte) (bool, error) {
 	}
 
 	return func(datagrams [][]byte) (bool, error) {
-		// Piggyback returns false when the agent won't carry the flight on STUN
-		// (no agent yet, or SPED is off/complete once ICE is connected). In that
-		// case the caller must fall back to writing it as plain DTLS, so report
-		// handled only when every datagram was consumed. A flight shares one
-		// piggyback state, so this is all-or-nothing in practice.
 		consumed := true
 		for i, datagram := range datagrams {
 			if !t.iceTransport.Piggyback(datagram, i == len(datagrams)-1) {
@@ -660,10 +651,6 @@ func (t *DTLSTransport) toDTLSServerOptions(sharedOpts []dtls.Option) []dtls.Ser
 	serverOpts = append(serverOpts,
 		dtls.WithClientAuth(clientAuth),
 		dtls.WithClientCAs(t.api.settingEngine.dtls.clientCAs),
-		// SPED (DTLS-in-STUN) only runs after a completed ICE connectivity check,
-		// which already proves return-routability — so the HelloVerifyRequest
-		// cookie round-trip is redundant (this is also why BoringSSL omits it).
-		// Skipping it saves ~1 RTT when the SFU is the DTLS server.
 		dtls.WithInsecureSkipVerifyHello(
 			t.api.settingEngine.dtls.insecureSkipHelloVerify || t.api.settingEngine.enableSped,
 		),
