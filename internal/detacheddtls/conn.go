@@ -194,6 +194,9 @@ func (c *Conn) processReadyEvents(conn *dtls.DetachedConn) error {
 			}
 
 			return event.Err
+		default:
+			// Events we don't consume, e.g. DTLS 1.3 early-data readiness/accept/reject
+			// (added in dtls v4). WebRTC never opts into early data, so these never fire.
 		}
 		if err != nil {
 			return err

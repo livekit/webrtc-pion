@@ -13,6 +13,7 @@ import (
 
 	"github.com/pion/ice/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // requireSpedActive proves the DTLS handshake was carried over STUN rather than
@@ -25,13 +26,11 @@ func requireSpedActive(t *testing.T, pc *PeerConnection) {
 	agent := pc.dtlsTransport.iceTransport.gatherer.getAgent()
 	assert.NotNil(t, agent)
 	state := reflect.ValueOf(agent).Elem().FieldByName("piggyback").FieldByName("state").Int()
-	switch state {
-	case int64(ice.PiggybackingStateConfirmed),
-		int64(ice.PiggybackingStatePending),
-		int64(ice.PiggybackingStateComplete):
-	default:
-		t.Fatalf("SPED inactive: piggybacking state %d (Off/Tentative) — handshake fell back to plain DTLS", state)
-	}
+	active := state == int64(ice.PiggybackingStateConfirmed) ||
+		state == int64(ice.PiggybackingStatePending) ||
+		state == int64(ice.PiggybackingStateComplete)
+	require.Truef(t, active,
+		"SPED inactive: piggybacking state %d (Off/Tentative) — handshake fell back to plain DTLS", state)
 }
 
 // TestForwardDTLSPacketDoesNotBlockOnTransportLock guards the SPED deadlock fix:
@@ -56,7 +55,7 @@ func TestForwardDTLSPacketDoesNotBlockOnTransportLock(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("forwardDTLSPacket blocked on t.lock — deadlock risk with renegotiation")
+		require.Fail(t, "forwardDTLSPacket blocked on t.lock — deadlock risk with renegotiation")
 	}
 }
 
