@@ -1587,9 +1587,9 @@ func TestPeerConnection_GetStats(t *testing.T) { //nolint:cyclop,maintidx // inv
 
 	answerICETransportStats := getTransportStats(t, reportPCAnswer, "iceTransport")
 	offerICETransportStats := getTransportStats(t, reportPCOffer, "iceTransport")
-	assert.Equal(t, "FEFD", offerICETransportStats.TLSVersion)
-	assert.Equal(t, "FEFD", answerICETransportStats.TLSVersion)
-	assert.Equal(t, "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", offerICETransportStats.DTLSCipher)
+	assert.Equal(t, "FEFC", offerICETransportStats.TLSVersion)
+	assert.Equal(t, "FEFC", answerICETransportStats.TLSVersion)
+	assert.Equal(t, "TLS_AES_128_GCM_SHA256", offerICETransportStats.DTLSCipher)
 	assert.Equal(t, offerICETransportStats.DTLSCipher, answerICETransportStats.DTLSCipher)
 	assert.Equal(t, "SRTP_AEAD_AES_256_GCM", offerICETransportStats.SRTPCipher)
 	assert.Equal(t, offerICETransportStats.SRTPCipher, answerICETransportStats.SRTPCipher)
