@@ -22,6 +22,7 @@ import (
 	dtlsElliptic "github.com/pion/dtls/v4/pkg/crypto/elliptic"
 	"github.com/pion/dtls/v4/pkg/protocol"
 	"github.com/pion/dtls/v4/pkg/protocol/handshake"
+	handshake12 "github.com/pion/dtls/v4/pkg/protocol/handshake/dtls12"
 	"github.com/pion/srtp/v3"
 	"github.com/pion/transport/v5/test"
 	"github.com/stretchr/testify/assert"
@@ -491,7 +492,7 @@ func TestDTLSTransport_toDTLSServerOptions_IncludesOptionalOptions(t *testing.T)
 		{
 			name: "CertificateRequestMessageHook",
 			configure: func(se *SettingEngine) {
-				se.dtls.certificateRequestMessageHook = func(m handshake.MessageCertificateRequest) handshake.Message {
+				se.dtls.certificateRequestMessageHook = func(m handshake12.MessageCertificateRequest) handshake.Message {
 					return &m
 				}
 			},
@@ -503,7 +504,7 @@ func TestDTLSTransport_toDTLSServerOptions_IncludesOptionalOptions(t *testing.T)
 				se.dtls.serverHelloMessageHook = func(m handshake.MessageServerHello) handshake.Message {
 					return &m
 				}
-				se.dtls.certificateRequestMessageHook = func(m handshake.MessageCertificateRequest) handshake.Message {
+				se.dtls.certificateRequestMessageHook = func(m handshake12.MessageCertificateRequest) handshake.Message {
 					return &m
 				}
 			},

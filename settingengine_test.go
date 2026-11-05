@@ -18,6 +18,7 @@ import (
 	dtlsCipherSuite "github.com/pion/dtls/v4/pkg/crypto/ciphersuite"
 	"github.com/pion/dtls/v4/pkg/crypto/elliptic"
 	"github.com/pion/dtls/v4/pkg/protocol/handshake"
+	handshake12 "github.com/pion/dtls/v4/pkg/protocol/handshake/dtls12"
 	"github.com/pion/ice/v4"
 	"github.com/pion/stun/v4"
 	"github.com/pion/transport/v5/test"
@@ -452,7 +453,7 @@ func TestSetHooks(t *testing.T) {
 	settingEngine.SetDTLSServerHelloMessageHook(func(msg handshake.MessageServerHello) handshake.Message {
 		return &msg
 	})
-	settingEngine.SetDTLSCertificateRequestMessageHook(func(msg handshake.MessageCertificateRequest) handshake.Message {
+	settingEngine.SetDTLSCertificateRequestMessageHook(func(msg handshake12.MessageCertificateRequest) handshake.Message {
 		return &msg
 	})
 

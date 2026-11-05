@@ -18,6 +18,7 @@ import (
 	dtlsElliptic "github.com/pion/dtls/v4/pkg/crypto/elliptic"
 	"github.com/pion/dtls/v4/pkg/protocol"
 	"github.com/pion/dtls/v4/pkg/protocol/handshake"
+	handshake12 "github.com/pion/dtls/v4/pkg/protocol/handshake/dtls12"
 	"github.com/pion/ice/v4"
 	"github.com/pion/logging"
 	"github.com/pion/stun/v4"
@@ -85,7 +86,7 @@ type SettingEngine struct {
 		customCipherSuites            func() []dtlsCipherSuite.Suite
 		clientHelloMessageHook        func(handshake.MessageClientHello) handshake.Message
 		serverHelloMessageHook        func(handshake.MessageServerHello) handshake.Message
-		certificateRequestMessageHook func(handshake.MessageCertificateRequest) handshake.Message
+		certificateRequestMessageHook func(handshake12.MessageCertificateRequest) handshake.Message
 		supportedProtocols            []string
 	}
 	sctp struct {
@@ -122,6 +123,7 @@ type SettingEngine struct {
 	dataChannelBlockWrite                     bool
 	handleUndeclaredSSRCWithoutAnswer         bool
 	ignoreRidPauseForRecv                     bool
+	enableSped                                bool
 }
 
 type renominationSettings struct {
@@ -672,7 +674,7 @@ func (e *SettingEngine) SetDTLSServerHelloMessageHook(hook func(handshake.Messag
 // SetDTLSCertificateRequestMessageHook if not nil, is called when a DTLS Certificate Request message is sent
 // from a client. The returned handshake message replaces the original message.
 func (e *SettingEngine) SetDTLSCertificateRequestMessageHook(
-	hook func(handshake.MessageCertificateRequest) handshake.Message,
+	hook func(handshake12.MessageCertificateRequest) handshake.Message,
 ) {
 	e.dtls.certificateRequestMessageHook = hook
 }
@@ -744,4 +746,9 @@ func (e *SettingEngine) SetHandleUndeclaredSSRCWithoutAnswer(handleUndeclaredSSR
 // (simulcast layer).
 func (e *SettingEngine) SetIgnoreRidPauseForRecv(ignoreRidPauseForRecv bool) {
 	e.ignoreRidPauseForRecv = ignoreRidPauseForRecv
+}
+
+// EnableSped enabled SPED/dtls-in-stun.
+func (e *SettingEngine) EnableSped(enable bool) {
+	e.enableSped = enable
 }
