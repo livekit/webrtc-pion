@@ -35,4 +35,4 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 )
 
-replace github.com/pion/ice/v4 => github.com/livekit/ice/v4 v4.4.8-warp.2
+replace github.com/pion/ice/v4 => github.com/livekit/ice/v4 v4.4.8-warp.3
